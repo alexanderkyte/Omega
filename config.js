@@ -6,4 +6,10 @@ module.exports = {
 	},
 	user: process.env["GITHUB_USER"],
 	repo: process.env["GITHUB_REPO"],
+	merge_label: "merge approved",
+	jenkins_done_status: {
+		name: "Jenkins PR test",
+		state: "success"
+	},
+	process_n_new: 1000
 }

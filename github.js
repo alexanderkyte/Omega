@@ -1,52 +1,63 @@
 var async = require("async");
 var GitHub = require("github");
-var phases = require("./commands");
 
 var ghHandle;
 var config;
 
-var extract_bot_commands = function(comments, cb) {
-	return async.map(comments, [], function(accum, comment, next){
-		var user = comment.user.login
-		if (!(user in config.reviewers))
-			next(null, accum);
-
-		for(var i=0; i < commands.Length; i++){
-			if (comment.body.match(commands[i].regex)) {
-				accum.push({
-					time: comment.update_at,
-					command: commands[i].name
-				});
-				return next(null, accum);
-			}
+var isSuccess = function(statuses) {
+	for (var i=0; i < statuses.Length; i++) {
+		var stat = statuses [i];
+		if (stat.state == config.jenkins_done_status.state &&
+				stat.context == config.jenkins_done_status.name) {
+				return true;
 		}
-	}, cb);
+	}
+	return false;
 }
 
-var PullRequest = function(pr, cb) {
+var PullRequest = function(pr, done) {
 	return async.waterfall([
 		function(next) {
+			get_label(pr.number, function(err, labels) {
+				var approved = false;
+				for (var i=0; i in labels; i++) {
+					if (labels[i].name == config.merge_label) {
+						approved = true;
+					}
+				}
+				next(err, approved);
+			})
+		},
+		function(labels, next) {
 			ghHandle.statuses.get({ 
 				user: config.user,
 				repo: config.repo,
 				sha: pr.head.sha 
-			}, next);
-		},
-		function(stat, next) {
-			ghHandle.pullRequests.getComments({ 
-				user: config.user,
-				repo: config.repo,
-				number: pr.number 
-			}, function(err, comments) {
-				extract_bot_commands(comments, function(commands, err){
-					return next(err, {
-						status: stat,
-						commands: commands
-					});
-				}); 
+			}, function(err, statuses){
+				var success = isSuccess (statuses)
+				return next(err, labels, success);
 			});
-		}], cb);
+		},
+		function(approved, success, next) {
+			if (success) {
+				done(err, null);
+			} else {
+				done(null, {
+					pr: pr.number,
+					approved: approved,
+					success: success
+				});
+			}
+		}], done);
 };
+
+var get_label = function(pr_num, cb) {
+	return ghHandle.issues.getIssueLabels({
+		user: config.user,
+		repo: config.repo,
+		number: pr_num
+	}, cb);
+}
 
 var config_all_open_prs;
 var create_config_all_open_prs = function() {
@@ -55,7 +66,8 @@ var create_config_all_open_prs = function() {
 		repo: config.repo,
 		state: "open",
 		sort: "updated",
-		direction: "desc"
+		direction: "desc",
+		per_page: config.process_n_new
 	};
 };
 
@@ -79,35 +91,11 @@ var get_pull_requests = function(cb) {
 	return ghHandle.pullRequests.getAll(config_all_open_prs, construct_pull_requests(cb));
 }
 
-var change_state = function(pr, state, cb){
-	return ghHandle.statuses.create({ 
-		user: config.user,
-		repo: config.repo,
-		number: pr.number, 
-		sha: pr.head.sha,
-		state: state,
-		description: "Set by merge bot."
-	}, function(err, data) {
-		return cb(err, null);
-	});
-};
-
-var post_message = function(pr, message, cb){
-	return ghHandle.issues.createComment({
-		user: config.user,
-		repo: config.repo,
-		number: pr.number,
-		body: message
-	}, function(err, data) {
-		return cb(err, null);
-	});
-};
-
-var try_merge = function(pr, cb){
+var try_merge = function(pr_number, cb){
 	return ghHandle.pullRequests.merge({ 
 		user: config.user,
 		repo: config.repo,
-		number: pr.number, 
+		number: pr_number, 
 	}, function(err, data) {
 		return cb(err, null);
 	});
@@ -123,8 +111,6 @@ module.exports = function(cfg) {
 
 	return {
 		get_pull_requests: get_pull_requests,
-		change_state: change_state,
-		post_message: post_message,
 		try_merge: try_merge,
 	};
 }

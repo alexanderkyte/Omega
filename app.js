@@ -2,23 +2,24 @@ var config = require("./config");
 var async = require("async");
 
 var GitHub = require("./github")(config);
-var Phases = require("./phases");
 
 var run = function() {
 	GitHub.get_pull_requests(function(prs, err) {
 
-		if (err)
+		if (err) {
+			console.dir(err);
 			return err;
-			//return console.dir(err);
+		}
 
-		async.each(prs, Phases.Process, function(err){
+		console.dir(prs);
+
+		async.each(prs, try_merge, function(err){
 			if (err)
+				console.dir(err);
 				return err;
-				//return console.log(err);
 		})
 
 	});
 };
 
-//setInterval(run, config.interval);
-run();
+setInterval(run, config.interval);
